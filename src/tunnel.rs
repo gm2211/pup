@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
 use russh::keys::{decode_secret_key, PublicKey};
-use russh::server::{Auth, Handler, Msg, Session};
+use russh::server::{Auth, ChannelOpenHandle, Handler, Msg, Session};
 use russh::ChannelId;
 use serde::{Deserialize, Serialize};
 use ssh_key::{rand_core::OsRng, Algorithm, EcdsaCurve, LineEnding, PrivateKey as SshKey};
@@ -242,9 +242,11 @@ impl Handler for SshHandler {
     async fn channel_open_session(
         &mut self,
         _channel: russh::Channel<Msg>,
+        reply: ChannelOpenHandle,
         _session: &mut Session,
-    ) -> Result<bool, Self::Error> {
-        Ok(true)
+    ) -> Result<(), Self::Error> {
+        reply.accept().await;
+        Ok(())
     }
 
     async fn channel_open_direct_tcpip(
@@ -254,8 +256,9 @@ impl Handler for SshHandler {
         port_to_connect: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: ChannelOpenHandle,
         session: &mut Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         let channel_id = channel.id();
         let handle = session.handle();
 
@@ -266,6 +269,7 @@ impl Handler for SshHandler {
             })?;
         let (mut tcp_read, tcp_write) = tcp.into_split();
         self.tcp_writers.insert(channel_id, tcp_write);
+        reply.accept().await;
 
         tokio::spawn(async move {
             let mut buf = vec![0u8; 16 * 1024];
@@ -284,7 +288,7 @@ impl Handler for SshHandler {
             let _ = handle.close(channel_id).await;
         });
 
-        Ok(true)
+        Ok(())
     }
 
     async fn data(
